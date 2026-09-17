@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' data: file:; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <title>냥이</title>
+  <link rel="stylesheet" href="pet.css" />
+</head>
+<body>
+  <!-- 고양이 + 말풍선이 함께 움직이는 컨테이너 -->
+  <div id="stage">
+    <div id="pet" class="pet state-walk">
+      <div id="bubble" class="bubble hidden">
+        <div id="bubbleText" class="bubble-text"></div>
+        <div id="bubbleTail" class="bubble-tail"></div>
+      </div>
+
+      <div id="askBox" class="ask-box hidden">
+        <input id="askInput" type="text" placeholder="냥이에게 물어보세요…" autocomplete="off" />
+        <button id="askSend" title="보내기">➤</button>
+      </div>
+
+      <div id="catWrap" class="cat-wrap">
+        <div id="zzz" class="zzz hidden">z<span>z</span><span>z</span></div>
+        <div id="earRing" class="ear-ring hidden"></div>
+        <div id="catArt"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 안내 토스트 (API 키 없음, 마이크 오류 등) -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="cat-art.js"></script>
+  <script src="voice.js"></script>
+  <script src="pet.js"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+.DS_Store
+npm-debug.log*
+
+# API 키는 절대 커밋하지 않는다
+config/apikey.txt
+.env

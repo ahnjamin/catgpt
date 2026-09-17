@@ -1,0 +1,50 @@
+name: 윈도우 설치 파일 빌드
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:      # Actions 탭에서 손으로 실행할 수도 있음
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 의존성 설치
+        run: npm install
+
+      # 저장소에 키를 커밋하지 않고도 설치본에 키를 넣고 싶을 때 사용.
+      # GitHub 저장소 → Settings → Secrets → Actions 에 GEMINI_API_KEY 를 등록하면 된다.
+      # (등록하지 않으면 어머니가 설정 창에서 직접 넣는 방식으로 동작한다)
+      - name: 기본 API 키 넣기 (선택)
+        shell: bash
+        env:
+          KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          mkdir -p config
+          if [ -n "$KEY" ]; then
+            printf '%s' "$KEY" > config/apikey.txt
+            echo "기본 API 키를 설치본에 포함합니다."
+          else
+            echo "API 키 시크릿이 없습니다. 설치 후 설정 창에서 직접 넣어야 합니다."
+          fi
+
+      - name: 설치 파일 만들기
+        run: npm run dist:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 결과물 업로드
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nyangi-Windows-Setup
+          path: dist/*.exe
+          if-no-files-found: error
+          retention-days: 30
