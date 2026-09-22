@@ -27,9 +27,18 @@ const FALLBACK_WAKE = [
   'gemini-2.5-flash'
 ];
 
-function modelChain(preferred, fallbacks) {
+/**
+ * 실제로 응답한 모델을 기억해 둔다.
+ * 기억해 두지 않으면 존재하지 않는 모델이 후보 맨 앞에 있을 때
+ * 호출할 때마다 404 왕복을 한 번씩 더 하게 된다 (웨이크워드 판정은 분당 최대 12회).
+ */
+const resolved = { chat: null, wake: null };
+
+function modelChain(preferred, fallbacks, kind) {
   const list = [];
-  if (preferred) list.push(preferred);
+  const known = kind && resolved[kind];
+  if (known) list.push(known);
+  if (preferred && !list.includes(preferred)) list.push(preferred);
   for (const m of fallbacks) if (!list.includes(m)) list.push(m);
   return list;
 }
@@ -86,14 +95,19 @@ function extractText(json) {
 /**
  * 모델 후보를 차례로 시도하고, thinkingConfig 같은 미지원 필드는 떼고 재시도한다.
  */
-async function callWithFallback({ apiKey, models, body }) {
+async function callWithFallback({ apiKey, models, body, kind }) {
   if (!apiKey) throw new Error('API 키가 없습니다.');
   let lastErr = null;
+
+  const remember = (model) => { if (kind) resolved[kind] = model; };
+  const forget = (model) => { if (kind && resolved[kind] === model) resolved[kind] = null; };
 
   for (const model of models) {
     // 1차: 그대로
     try {
-      return await rawCall(model, apiKey, body);
+      const out = await rawCall(model, apiKey, body);
+      remember(model);
+      return out;
     } catch (err) {
       lastErr = err;
       const msg = String(err.message || '');
@@ -103,14 +117,19 @@ async function callWithFallback({ apiKey, models, body }) {
         const stripped = JSON.parse(JSON.stringify(body));
         if (stripped.generationConfig) delete stripped.generationConfig.thinkingConfig;
         try {
-          return await rawCall(model, apiKey, stripped);
+          const out = await rawCall(model, apiKey, stripped);
+          remember(model);
+          return out;
         } catch (err2) {
           lastErr = err2;
         }
       }
 
-      // 모델이 없으면 다음 후보로
-      if (err.status === 404 || /not found|not supported|is not available/i.test(msg)) continue;
+      // 모델이 없으면 기억에서 지우고 다음 후보로
+      if (err.status === 404 || /not found|not supported|is not available/i.test(msg)) {
+        forget(model);
+        continue;
+      }
 
       // 키가 잘못됐거나 권한 문제면 후보를 더 돌려도 소용없다
       if (err.status === 401 || err.status === 403) throw err;
@@ -149,8 +168,9 @@ async function ask({ apiKey, model, system, history, userText }) {
   };
   const json = await callWithFallback({
     apiKey,
-    models: modelChain(model, FALLBACK_CHAT),
-    body
+    models: modelChain(model, FALLBACK_CHAT, 'chat'),
+    body,
+    kind: 'chat'
   });
   return extractText(json);
 }
@@ -195,8 +215,9 @@ async function askWithAudio({ apiKey, model, system, history, audioBase64, mimeT
 
   const json = await callWithFallback({
     apiKey,
-    models: modelChain(model, FALLBACK_CHAT),
-    body
+    models: modelChain(model, FALLBACK_CHAT, 'chat'),
+    body,
+    kind: 'chat'
   });
 
   const raw = extractText(json);
@@ -249,8 +270,9 @@ async function wakeCheck({ apiKey, model, audioBase64, mimeType, wakeWord }) {
 
   const json = await callWithFallback({
     apiKey,
-    models: modelChain(model, FALLBACK_WAKE),
-    body
+    models: modelChain(model, FALLBACK_WAKE, 'wake'),
+    body,
+    kind: 'wake'
   });
 
   let out = '';
@@ -258,4 +280,4 @@ async function wakeCheck({ apiKey, model, audioBase64, mimeType, wakeWord }) {
   return /^\s*Y/i.test(out);
 }
 
-module.exports = { ask, askWithAudio, wakeCheck, cleanForSpeech };
+module.exports = { ask, askWithAudio, wakeCheck, cleanForSpeech, parseTranscriptAndReply, modelChain, _resolved: resolved };

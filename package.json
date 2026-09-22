@@ -6,6 +6,7 @@
   "author": "jaemin",
   "license": "MIT",
   "scripts": {
+    "test": "node test/smoke.js",
     "start": "electron .",
     "dev": "electron . --dev",
     "dist:win": "electron-builder --win --x64",

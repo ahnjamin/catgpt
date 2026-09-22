@@ -9,6 +9,13 @@ const fs = require('fs');
 
 const store = require('./store');
 const gemini = require('./gemini');
+const { createBudget } = require('./budget');
+
+// 웨이크워드 판정 하루 상한.
+// 무료 키의 하루 요청 수(RPD)는 모델마다 다르고 Flash-Lite 쪽이 훨씬 넉넉하다.
+// 실제 한도에 닿기 전에 우리가 먼저 멈추는 게 목적이라 여유를 두고 잡는다.
+// 현재 한도는 https://ai.google.dev/gemini-api/docs/rate-limits 에서 확인할 것.
+const wakeBudget = createBudget(400);
 
 // ── 단일 인스턴스 보장 (두 번 실행되면 고양이가 두 마리가 되므로) ──────────────
 const gotLock = app.requestSingleInstanceLock();
@@ -74,11 +81,19 @@ function createPetWindow() {
 
   petWindow.on('closed', () => { petWindow = null; });
 
-  if (isDev) petWindow.webContents.openDevTools({ mode: 'detach' });
+  // 창 밖을 눌러 다른 프로그램으로 넘어가면 입력창은 닫아 준다
+  petWindow.on('blur', () => send('pet:blur'));
 
-  // 화면 해상도가 바뀌면 창 크기도 따라가기
+  if (isDev) petWindow.webContents.openDevTools({ mode: 'detach' });
+}
+
+/**
+ * 화면 변화와 최상위 유지를 감시한다.
+ * 창 생성 함수 안에 두면 창을 다시 만들 때마다 리스너와 타이머가 쌓이므로 앱당 한 번만 건다.
+ */
+function watchDisplays() {
   const resize = () => {
-    if (!petWindow) return;
+    if (!petWindow || petWindow.isDestroyed()) return;
     const a = screen.getPrimaryDisplay().workArea;
     petWindow.setBounds({ x: a.x, y: a.y, width: a.width, height: a.height });
   };
@@ -92,6 +107,17 @@ function createPetWindow() {
       petWindow.setAlwaysOnTop(true, 'screen-saver');
     }
   }, 5000);
+
+  // 마우스 위치를 메인에서 직접 읽어 렌더러에 알려준다.
+  // setIgnoreMouseEvents 의 forward:true 로 오는 mousemove 는 다른 프로그램이
+  // 포커스를 잡고 있으면 오지 않는 경우가 있어서(electron#33281),
+  // 고양이 위에 마우스를 올려도 반응하지 않는 일이 생긴다.
+  setInterval(() => {
+    if (!petWindow || petWindow.isDestroyed() || !petWindow.isVisible()) return;
+    const pt = screen.getCursorScreenPoint();
+    const b = petWindow.getBounds();
+    send('pet:cursor', { x: pt.x - b.x, y: pt.y - b.y });
+  }, 120);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -131,6 +157,10 @@ function buildTrayMenu() {
     {
       label: '🐱 냥이 불러오기',
       click: () => send('pet:summon')
+    },
+    {
+      label: '🔁 방금 한 말 다시 듣기',
+      click: () => send('pet:repeat')
     },
     { type: 'separator' },
     {
@@ -244,10 +274,11 @@ function registerIpc() {
     }
   });
 
-  // 트레이에서 불러냈을 때처럼, 입력창에 바로 타이핑할 수 있도록 창에 포커스를 준다
+  // 입력창에 바로 타이핑할 수 있도록 창에 키보드 포커스만 준다.
+  // 여기서 setIgnoreMouseEvents(false) 를 부르면 창이 화면 전체를 덮고 있기 때문에
+  // 바탕화면 전체가 클릭되지 않는다. 마우스 판정은 렌더러의 히트테스트에만 맡긴다.
   ipcMain.on('pet:focus', () => {
     if (!petWindow || petWindow.isDestroyed()) return;
-    petWindow.setIgnoreMouseEvents(false);
     petWindow.focus();
   });
 
@@ -299,6 +330,7 @@ function registerIpc() {
   ipcMain.handle('ai:wake-check', async (_e, { audioBase64, mimeType }) => {
     const apiKey = resolveApiKey();
     if (!apiKey) return { woke: false, error: 'NO_KEY' };
+    if (!wakeBudget.take()) return { woke: false, error: 'DAILY_LIMIT' };
     const s = store.get();
     try {
       const woke = await gemini.wakeCheck({
@@ -417,6 +449,7 @@ app.whenReady().then(() => {
   store.init();
   registerIpc();
   createPetWindow();
+  watchDisplays();
   createTray();
   applyAutoLaunch(store.get().autoLaunch);
 

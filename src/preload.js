@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld('nyangi', {
 
   // 기타
   onSummon: (cb) => ipcRenderer.on('pet:summon', () => cb()),
+  onRepeat: (cb) => ipcRenderer.on('pet:repeat', () => cb()),
+  onCursor: (cb) => ipcRenderer.on('pet:cursor', (_e, p) => cb(p)),
+  onBlur: (cb) => ipcRenderer.on('pet:blur', () => cb()),
   openExternal: (url) => ipcRenderer.invoke('app:open-external', url),
   quit: () => ipcRenderer.invoke('app:quit')
 });
