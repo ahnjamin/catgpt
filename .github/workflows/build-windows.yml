@@ -18,7 +18,10 @@ jobs:
           cache: npm
 
       - name: 의존성 설치
-        run: npm install
+        run: npm ci
+
+      - name: 자체 점검
+        run: npm test
 
       # 저장소에 키를 커밋하지 않고도 설치본에 키를 넣고 싶을 때 사용.
       # GitHub 저장소 → Settings → Secrets → Actions 에 GEMINI_API_KEY 를 등록하면 된다.

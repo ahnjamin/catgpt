@@ -73,6 +73,10 @@ async function init() {
   });
 
   bindRange('scale', 'scaleVal', v => '×' + Number(v).toFixed(1));
+  bindRange('fontScale', 'fontScaleVal', v => {
+    const n = Number(v);
+    return n <= 1.05 ? '보통' : n >= 1.65 ? '아주 크게' : n >= 1.35 ? '크게' : '조금 크게';
+  });
 
   // ── 3. 목소리 ──────────────────────────────────────────────────────────
   bindCheck('voiceEnabled');

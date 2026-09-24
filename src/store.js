@@ -23,6 +23,7 @@ const DEFAULTS = {
   skin: 'ginger',                   // ginger | tuxedo | gray | custom
   customSkinPath: '',               // 사진 기반 커스텀 이미지(선택)
   scale: 1.0,                       // 고양이 크기 배율
+  fontScale: 1.0,                   // 말풍선 글자 크기 배율 (1.0 = 15.5px)
   hidden: false,                    // 화면에서 잠시 숨기기
 
   // ── 음성 ──────────────────────────────────────────────

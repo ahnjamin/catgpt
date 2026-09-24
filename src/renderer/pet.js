@@ -35,7 +35,8 @@ const S = {
   nextBehaviorAt: 0,
   wakeCalls: [],       // 최근 웨이크워드 판정 호출 시각들 (사용량 보호)
   askOpen: false,
-  interactive: false
+  interactive: false,
+  lastReply: ''      // 트레이의 "다시 듣기"용
 };
 
 const CAT_WIDTH = () => el.pet.offsetWidth || 150;
@@ -57,6 +58,10 @@ async function init() {
   });
 
   window.nyangi.onSummon(() => summon());
+  window.nyangi.onRepeat(() => repeatLast());
+  window.nyangi.onCursor((p) => { S.pointer = p; updateInteractive(); });
+  // 다른 프로그램으로 넘어가면 입력창은 닫는다 (열어둔 채 잊어버리지 않도록)
+  window.nyangi.onBlur(() => { if (S.askOpen) closeAsk(); });
 
   bindInteraction();
   startBlinking();
@@ -95,6 +100,9 @@ function applySettings(s, rebuildArt) {
     }
     document.documentElement.style.setProperty('--cat-w', Math.round(150 * (s.scale || 1)) + 'px');
   }
+  // 말풍선 글자 크기 (눈이 불편하신 분을 위해 따로 뺐다 — 고양이 크기와는 별개)
+  document.documentElement.style.setProperty(
+    '--bubble-font', (15.5 * (Number(s.fontScale) || 1)).toFixed(1) + 'px');
   el.pet.classList.toggle('hidden-away', !!s.hidden);
 }
 
@@ -283,11 +291,18 @@ function hitting(node) {
   return x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 4 && y <= r.bottom + 4;
 }
 
+/**
+ * 펫 창은 작업 영역 전체를 덮고 있다.
+ * 그래서 "입력창이 열려 있으면 무조건 클릭을 받는다" 같은 조건을 쓰면
+ * 그동안 바탕화면 전체가 눌리지 않는다. 마우스가 실제로 고양이·말풍선·
+ * 입력창·안내창 위에 있을 때만 클릭을 받고, 나머지는 전부 통과시킨다.
+ * (hitting() 이 hidden 클래스를 이미 걸러내므로 따로 볼 필요가 없다)
+ */
 function updateInteractive() {
-  const want = S.askOpen ||
-               !el.toast.classList.contains('hidden') ||
-               hitting(el.catWrap) ||
-               hitting(el.bubble);
+  const want = hitting(el.catWrap) ||
+               hitting(el.bubble) ||
+               hitting(el.askBox) ||
+               hitting(el.toast);
   if (want !== S.interactive) {
     S.interactive = want;
     window.nyangi.setInteractive(want);
@@ -371,6 +386,10 @@ function handleAiError(error) {
     showToast('Gemini API 키가 없어요. 설정에서 키를 넣어주세요.', {
       button: '설정 열기', onClick: () => window.nyangi.openSettings()
     });
+    return;
+  }
+  if (error === 'DAILY_LIMIT') {
+    showToast('오늘은 냥이가 너무 많이 들었어요. 내일 다시 불러주세요.<br>(글씨로 물어보는 건 계속 됩니다)');
     return;
   }
   if (/quota|RESOURCE_EXHAUSTED|429/i.test(error)) {
@@ -473,6 +492,10 @@ async function handleUtterance(u) {
 
   const res = await window.nyangi.wakeCheck({ audioBase64: u.base64, mimeType: u.mimeType });
   if (res.error === 'NO_KEY') return;
+  if (res.error === 'DAILY_LIMIT') {
+    if (!S.warnedDailyLimit) { S.warnedDailyLimit = true; handleAiError('DAILY_LIMIT'); }
+    return;
+  }
   if (!res.woke) return;
 
   // 불렸다!
@@ -523,9 +546,26 @@ function pickKoreanVoice() {
          null;
 }
 
+let unmuteGuard = null;
+
+/**
+ * 말하는 동안에는 자기 목소리를 듣지 않도록 귀를 막는다.
+ *
+ * 크로미움의 speechSynthesis 는 가끔 onend / onerror 를 둘 다 쏘지 않는다.
+ * 그러면 귀를 막은 채로 끝나 고양이가 영영 못 듣게 되는데, 화면상 아무 증상이
+ * 없어서 재시작 말고는 알아챌 방법이 없다. 그래서 타이머로 반드시 풀어준다.
+ */
 function speak(text) {
+  S.lastReply = text;
   if (!settings || !settings.speakReplies) { flashTalking(text); return; }
   if (typeof window.speechSynthesis === 'undefined') { flashTalking(text); return; }
+
+  const unmute = () => {
+    clearTimeout(unmuteGuard);
+    unmuteGuard = null;
+    window.Voice.setMuted(false);
+    paintState();
+  };
 
   try {
     window.speechSynthesis.cancel();
@@ -537,12 +577,17 @@ function speak(text) {
     if (v) u.voice = v;
 
     u.onstart = () => { window.Voice.setMuted(true); paintState('talk'); };
-    u.onend = () => { window.Voice.setMuted(false); paintState(); };
-    u.onerror = () => { window.Voice.setMuted(false); paintState(); };
+    u.onend = unmute;
+    u.onerror = unmute;
+
+    // 글자 수로 대충 잡은 예상 시간 + 여유. 끝났다는 신호가 안 와도 여기서 풀린다.
+    clearTimeout(unmuteGuard);
+    unmuteGuard = setTimeout(unmute, Math.min(45000, 5000 + text.length * 200));
 
     window.speechSynthesis.speak(u);
   } catch (err) {
     console.warn('[냥이] 읽어주기 실패:', err);
+    unmute();
     flashTalking(text);
   }
 }
@@ -594,6 +639,8 @@ function scheduleIdleChatter() {
 // 트레이에서 "불러오기"
 // ─────────────────────────────────────────────────────────────────────────────
 function summon() {
+  // 숨김 상태면 불러도 아무것도 보이지 않는다 (.pet.hidden-away { display:none })
+  if (settings && settings.hidden) window.nyangi.setSettings({ hidden: false });
   S.x = Math.round(window.innerWidth / 2 - CAT_WIDTH() / 2);
   S.dir = 1;
   setBehavior('sit', 15000);
@@ -602,6 +649,19 @@ function summon() {
   say(line, 7000);
   speak(line);
   enterAwake();
+}
+
+/** 트레이 → "방금 한 말 다시 듣기". 말풍선이 사라져서 놓쳤을 때. */
+function repeatLast() {
+  if (!S.lastReply) {
+    const line = '아직 아무 말도 안 했어요. 불러주시면 이야기할게요!';
+    say(line, 6000);
+    speak(line);
+    return;
+  }
+  if (settings && settings.hidden) window.nyangi.setSettings({ hidden: false });
+  say(S.lastReply);
+  speak(S.lastReply);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

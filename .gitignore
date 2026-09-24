@@ -7,3 +7,6 @@ npm-debug.log*
 # API 키는 절대 커밋하지 않는다
 config/apikey.txt
 .env
+
+# Serena MCP 캐시 (에디터 도구가 만드는 것, 소스 아님)
+.serena/
